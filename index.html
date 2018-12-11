@@ -1,0 +1,315 @@
+
+<!doctype html>
+
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#4F7DC9">
+  <meta charset="UTF-8">
+  <title></title>
+  <script src="../../bower_components/webcomponentsjs/webcomponents-lite.js"></script>
+  <link rel="import" href="../../elements/codelab.html">
+  <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <style is="custom-style">
+    body {
+      font-family: "Roboto",sans-serif;
+      background: var(--google-codelab-background, #F8F9FA);
+    }
+  </style>
+  
+</head>
+<body unresolved class="fullbleed">
+
+  <google-codelab title=""
+                  environment="web"
+                  feedback-link="">
+    
+      <google-codelab-step label="Introduction" duration="120">
+        <p>In this codelab, we will set up a <a href="https://cloud.google.com/solutions/continuous-integration/" target="_blank">Continuous Integration</a> and <a href="https://cloud.google.com/solutions/continuous-delivery/" target="_blank">Continuous Deployment</a> Pipeline for a Tensorflow gpu model deployed via containers, on the Google Cloud Platform using Google&#39;s in-built <a href="https://cloud.google.com/cloud-build/" target="_blank">Cloud Build</a> service. Here, our source code will reside on Google&#39;s private Git repository <a href="https://cloud.google.com/source-repositories/" target="_blank">Cloud Source Repository</a>, image will be stored on <a href="https://cloud.google.com/container-registry/" target="_blank">Google Container Registry</a>, a private repository for your Docker images accessible from your Google Cloud projects and then the image will be deployed on <a href="https://kubernetes.io/" target="_blank">Kubernetes</a>, an open-source system for automating deployment, scaling, and management of containerized applications.</p>
+<p><strong>What you&#39;ll learn</strong></p>
+<ul>
+<li>How to set up GKE cluster.  </li>
+<li>How to write a cloudbuild.yaml script.</li>
+<li>How to set up Cloud Source Repository.</li>
+<li>How to set up CI/CD Pipeline on Google Platform using Google in-built services.</li>
+<li>How to create a trigger and autotrigger the pipeline whenever there is a new commit to Cloud Source Repository.</li>
+<li>How to deploy a new model from source-to-production automatically.</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Setup and Requirements" duration="120">
+        <p><strong>Google Cloud Shell</strong></p>
+<p>While Google Cloud and Kubernetes can be operated remotely from your laptop, in this codelab we will be using <a href="https://cloud.google.com/cloud-shell/" target="_blank">Google Cloud Shell</a>, a command line environment running in the Cloud. </p>
+<p>This Debian-based virtual machine is loaded with all the development tools you&#39;ll need. It offers a persistent 5GB home directory, and runs on the Google Cloud, greatly enhancing network performance and authentication. This means that all you will need for this codelab is a browser.</p>
+<p>To activate Google Cloud Shell, from the developer console simply click the button on the right-hand side (it should only take a few moments to provision and connect to the environment):  </p>
+<p><img style="max-width: 314.50px" src="img/8c6a54ed0eaca1b0.png"></p>
+<p>Then accept the terms of service and click the &#34;Start Cloud Shell&#34; link: </p>
+<p><img style="max-width: 624.00px" src="img/d562f3754962302e.png"></p>
+<p>Once connected to the cloud shell, you should see that you are already authenticated and that the project is already set to your <code>PROJECT_ID : </code></p>
+<pre>gcloud auth list</pre>
+<p><strong>Command Output</strong></p>
+<pre>Credentialed accounts:
+ - &lt;myaccount&gt;@&lt;mydomain&gt;.com (active)</pre>
+<aside class="special"><p>Note:  <strong>gcloud</strong> is the powerful and unified command-line tool for Google Cloud Platform. Full documentation is available from <a href="https://cloud.google.com/sdk/gcloud/" target="_blank">https://cloud.google.com/sdk/gcloud</a>. It comes pre-installed on CloudShell and you will surely enjoy its support for tab-completion.</p>
+</aside>
+<pre>gcloud config list project</pre>
+<p><strong>Command Output</strong></p>
+<pre>[core]
+project = &lt;PROJECT_ID&gt;</pre>
+<p>If for some reason the project is not set, simply issue the following command :</p>
+<pre>gcloud config set project &lt;PROJECT_ID&gt;</pre>
+<p>Looking for your  <code>PROJECT_ID :?</code> Check out what ID you used in the setup steps or look it up in the console dashboard:</p>
+<p><img style="max-width: 624.00px" src="img/91da9cff0d991ccc.png"></p>
+<p><strong>IMPORTANT</strong>: Finally, set the default zone and project configuration:<br></p>
+<pre>gcloud config set compute/zone us-central1-f</pre>
+<p>You can choose a variety of different zones. Learn more in the <a href="https://cloud.google.com/compute/docs/regions-zones/regions-zones" target="_blank">Regions &amp; Zones documentation</a>.</p>
+<p>All the models and its corresponding files and kubernetes configuration files are stored in Google storage bucket named <strong>jh-od-model</strong>. You can download them via following command:  </p>
+<pre>gsutil -m cp -r gs://jh-od-model/* .</pre>
+<aside class="special"><p>Note: When you run <strong>gcloud</strong> on your own machine, the config settings would&#39;ve been persisted across sessions. But in Cloud Shell, you will need to set this for every new session or reconnection.</p>
+</aside>
+<aside class="special"><p>Note: Make sure that kubernetes Engine API is enabled, if not enable it from <a href="https://console.cloud.google.com/apis/library/container.googleapis.com?q=kuber&id=1def4230-f361-4931-b386-576c62b90799&project=shopin-220607&authuser=1&organizationId=809067657803" target="_blank">Kubernetes Engine API</a></p>
+</aside>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Create GKE Cluster" duration="120">
+        <p>To create your GKE cluster, navigate to the Google Kubernetes Engine section of the web console and wait for the system to initialize (it should only take a few seconds). </p>
+<p><img style="max-width: 624.00px" src="img/958137ed3087d6cf.png"></p>
+<p>A cluster consists of a Kubernetes master API server hosted by Google and a set of worker nodes. The worker nodes are Compute Engine virtual machines.</p>
+<p>First, make sure you have set your project using gcloud :</p>
+<pre>gcloud config set project PROJECT_ID</pre>
+<p>Let&#39;s use the <strong>gcloud </strong>CLI from your CloudShell session to create a cluster with custom node configuration (this will take a few minutes to complete):</p>
+<p>(IMPORTANT: make sure to replace PROJECT_ID, CLUSTER_NAME, ZONE_NAME and REGION_NAME  with yours) :</p>
+<pre>gcloud beta container --project &#34;PROJECT_ID&#34; clusters create &#34;CLUSTER_NAME&#34; --zone &#34;ZONE_NAME&#34; --username &#34;admin&#34; --cluster-version &#34;1.11.4-gke.8&#34; --machine-type &#34;custom-10-40960&#34; --accelerator &#34;type=nvidia-tesla-p100,count=2&#34; --image-type &#34;COS&#34; --disk-type &#34;pd-standard&#34; --disk-size &#34;100&#34; --scopes &#34;https://www.googleapis.com/auth/devstorage.read_only&#34;,&#34;https://www.googleapis.com/auth/logging.write&#34;,&#34;https://www.googleapis.com/auth/monitoring&#34;,&#34;https://www.googleapis.com/auth/servicecontrol&#34;,&#34;https://www.googleapis.com/auth/service.management.readonly&#34;,&#34;https://www.googleapis.com/auth/trace.append&#34; --num-nodes &#34;2&#34; --enable-cloud-logging --enable-cloud-monitoring --no-enable-ip-alias --network &#34;projects/PROJECT_ID/global/networks/default&#34; --subnetwork &#34;projects/PROJECT_ID/regions/REGION_NAME/subnetworks/default&#34; --enable-autoscaling --min-nodes &#34;2&#34; --max-nodes &#34;5&#34; --addons HorizontalPodAutoscaling,HttpLoadBalancing --enable-autoupgrade --enable-autorepair</pre>
+<p>This is the console output you should see :</p>
+<pre>Creating cluster jh-tfs-gpu-cluster in ZONE_NAME...done.
+Created [https://container.googleapis.com/v1beta1/projects/PROJECT_ID/zones/ZONE_NAME/clusters/jh-tfs-gpu-cluster].                                                                                                 kubeconfig entry generated for jh-tfs-gpu-cluster.
+
+NAME                LOCATION    MASTER_VERSION  STATUS         MACHINE_TYPE
+jh-tfs-gpu-cluster  us-east1-c  1.11.4-gke.8    RUNNING        custom-10-40960</pre>
+<aside class="special"><p>Alternatively, you could create this cluster via the Console shown above: <em>Compute &gt; Kubernetes Engine &gt; Kubernetes Clusters &gt; Create a container cluster</em>.</p>
+</aside>
+<aside class="special"><p>You can create the cluster in another Zone but it is recommended to keep it on the same region as the storage bucket used by the container registry (see previous step).</p>
+</aside>
+<p>You should now have a fully-functioning Kubernetes cluster powered by Google Kubernetes Engine:</p>
+<p><img style="max-width: 624.00px" src="img/1aa52d2fdad371f8.png"></p>
+<p>Now to deploy a Tensorflow GPU model, you have to install nvidia driver and nvidia docker to your kubernetes cluster. To do so follow below steps:</p>
+<ol type="1" start="1">
+<li>To login into your kubernetes cluster, run following command to your cloud shell:</li>
+</ol>
+<p>        (IMPORTANT: Replace CLUSTER_NAME, ZONE_NAME and PROJECT_ID with yours)</p>
+<pre><code>gcloud container clusters get-credentials CLUSTER_NAME --zone ZONE_NAME --project PROJECT_ID</code></pre>
+<ol type="1" start="2">
+<li>Now to install nvidia driver run following command to cloud shell:</li>
+</ol>
+<pre>kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/stable/nvidia-driver-installer/cos/daemonset-preloaded.yaml</pre>
+<ol type="1" start="3">
+<li>Now to install nvidia docker run following command to cloud shell:</li>
+</ol>
+<pre>docker volume ls -q -f driver=nvidia-docker | xargs -r -I{} -n1 docker ps -q -a -f volume={} | xargs -r docker rm -f
+
+sudo apt-get purge -y nvidia-docker
+
+# Add the package repositories
+curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | \
+  sudo apt-key add -
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
+  sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+sudo apt-get update
+
+# Install nvidia-docker2 and reload the Docker daemon configuration
+sudo apt-get install -y nvidia-docker2
+sudo pkill -SIGHUP dockerd</pre>
+<ol type="1" start="4">
+<li>Now, we have to define default runtime as nvidia to run our tensorflow gpu model. To do so, run following command to your cloud shell:</li>
+</ol>
+<pre><code># Become a root user
+sudo su
+
+#Add runtime as nvidia to daemon.json file
+vim /etc/docker/daemon.json</code></pre>
+<ol type="1" start="5">
+<li>Before adding default runtime as nvidia, daemon.json file will look like below:</li>
+</ol>
+<p><img style="max-width: 550.73px" src="img/d6a39885d4194ec6.png"></p>
+<ol type="1" start="6">
+<li>Just add <code>&#34;default-runtime&#34;: &#34;nvidia&#34;,</code><strong> </strong>on top of daemon.json file, after adding default runtime as nvidia, daemon.json will be like below:</li>
+</ol>
+<p><img style="max-width: 537.50px" src="img/bc3d21b5293aafe2.png"></p>
+<ol type="1" start="7">
+<li>Just save your daemon.json file and restart docker by following command:</li>
+</ol>
+<pre><code>sudo service docker restart</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Create New Repository" duration="0">
+        <p><a href="https://cloud.google.com/source-repositories/" target="_blank">Google Cloud Source Repository</a> provides Git version control to support collaborative development of an application or service. Let&#39;s see how to create a new repository in Cloud Source Repositories. This repository will contain tensorflow gpu model which you can later deploy to GKE, it&#39;s corresponding configuration files, kubernetes configuration files which will be used to create kubernetes pods, services and horizontal pod autoscaler and a config.yaml script which will run our Continuous Integration and Continuous Deployment Pipeline.</p>
+<aside class="special"><p>Note: If Cloud Source Repository API is not enabled for your project, enable it from here: <a href="https://console.cloud.google.com/apis/library/sourcerepo.googleapis.com?q=cloud%20source&id=52e426bf-29dc-4de3-a852-95d42962f4e4&project=shopin-220607&authuser=1&organizationId=809067657803" target="_blank">Cloud Source Repositories</a>.</p>
+</aside>
+<p>Create a new repository to cloud source repository by running following command in cloud shell: </p>
+<p>(IMPORTANT: make sure to replace REPO_NAME with yours) :</p>
+<pre>gcloud source repos create REPO_NAME </pre>
+<aside class="special"><p>Note: Make sure that user should have source.repos.create permission before creating new repository.</p>
+</aside>
+<p>Clone contents of new repository into cloud shell git repository using following command:</p>
+<p>(IMPORTANT: make sure to replace REPO_NAME with yours) :</p>
+<pre>gcloud source repos clone REPO_NAME </pre>
+<p>Navigate to your cloned repository using following command:</p>
+<pre>cd REPO_NAME </pre>
+<p>Copy all the models, its corresponding files and kubernetes configuration files stored in Google storage bucket named <strong>jh-od-model</strong> via following command:  </p>
+<pre>gsutil -m cp -r gs://jh-od-model/* .</pre>
+<p>Next, create a build config file named <strong>cloudbuild.yaml, </strong>which contains set of commands required to run your CI/CD Pipeline.</p>
+<p>Create a cloudbuild.yaml by running below command in your shell:</p>
+<pre>vim cloudbuild.yaml</pre>
+<p>With this content:</p>
+<p>(IMPORTANT: make sure to replace PROJECT_ID, [ZONE-NAME], [CLUSTER-NAME]  with yours) :</p>
+<pre>steps:
+- name: &#39;gcr.io/cloud-builders/docker&#39;
+  args: [&#34;build&#34;, &#34;-t&#34;, &#34;gcr.io/PROJECT_ID/jh-cicd&#34;, &#34;.&#34;]
+
+- name: &#39;gcr.io/cloud-builders/docker&#39;
+  args: [&#34;push&#34;, &#34;gcr.io/PROJECT_ID/jh-cicd&#34;]
+
+- name: &#39;gcr.io/cloud-builders/kubectl&#39;
+  args:
+  - &#39;apply&#39;
+  - &#39;-f&#39;
+  - &#39;deployment.yaml&#39;
+  env:
+  - &#39;CLOUDSDK_COMPUTE_ZONE=ZONE-NAME&#39;
+  - &#39;CLOUDSDK_CONTAINER_CLUSTER=CLUSTER-NAME&#39;
+
+- name: &#39;gcr.io/cloud-builders/kubectl&#39;
+  args:
+  - &#39;apply&#39;
+  - &#39;-f&#39;
+  - &#39;service.yaml&#39;
+  env:
+  - &#39;CLOUDSDK_COMPUTE_ZONE=ZONE-NAME&#39;
+  - &#39;CLOUDSDK_CONTAINER_CLUSTER=CLUSTER-NAME&#39;
+
+- name: &#39;gcr.io/cloud-builders/kubectl&#39;
+  args:
+  - &#39;apply&#39;
+  - &#39;-f&#39;
+  - &#39;hpa.yaml&#39;
+  env:
+  - &#39;CLOUDSDK_COMPUTE_ZONE=ZONE-NAME&#39;
+  - &#39;CLOUDSDK_CONTAINER_CLUSTER=CLUSTER-NAME&#39;
+</pre>
+<p>Where, </p>
+<p>[CLUSTER-NAME]: Name of kubernetes cluster.</p>
+<p>[ZONE-NAME]: Zone name of kubernetes cluster.</p>
+<p>PROJECT_ID: Project ID of your project.</p>
+<p>So, the recipe for <strong>cloudbuild.yaml</strong> script is started with <strong>steps:</strong> section which contain the build steps that you want Cloud Build to perform, under steps, the first <strong>name: </strong>field contains a build step with a docker builder <strong>gcr.io/cloud-builders/docker </strong>which is a container image running docker, the <strong>args:</strong> field associated with this name is basically passing the contents to builder referenced by <strong>name:</strong> field and combining both of them, they are creating a docker image as per the Dockerfile present in the same directory represented by &#34;<strong>.&#34; </strong>symbol and tagging the image with <strong>gcr.io/PROJECT_ID/jh-cicd</strong> tag, in the next step, again there is a name and associated args field and combining both of them, they are pushing the earlier created docker image to <a href="https://cloud.google.com/container-registry/" target="_blank">Google Container Registry</a>, the next <strong>name: </strong> field contains kubectl contain and after combining with the associated <strong>args:</strong> tag will create <strong>deployment</strong> to the kubernetes cluster defined by <strong>env:</strong> tag, the next <strong>name: </strong> field contains kubectl contain and after combining with the associated <strong>args:</strong> tag will create <strong>service</strong> to the kubernetes cluster defined by <strong>env:</strong> tag, and the last <strong>name: </strong> field contains kubectl contain and after combining with the associated <strong>args:</strong> tag will create <strong>horizontal pod autoscaler</strong> to the kubernetes cluster defined by <strong>env:</strong> tag</p>
+<p>Now, all the required files, folders and scripts are ready. It&#39;s time to push these code to source code repository.</p>
+<p>To do so, follow below steps:</p>
+<ol type="1" start="1">
+<li>Add the files to repository by executing following command in cloud shell:</li>
+</ol>
+<pre>git add .</pre>
+<ol type="1" start="2">
+<li>Commit the file by executing following command in cloud shell:</li>
+</ol>
+<pre>git commit -m &#34;message why are you committing these codes&#34;</pre>
+<ol type="1" start="3">
+<li>Add the contents of cloud shell local repository to Cloud Source Repository by executing following command:</li>
+</ol>
+<pre>git push origin master</pre>
+<p>Congratulations, now your code is pushed to the Cloud Source Repository.</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Create Build Trigger" duration="120">
+        <p>A <strong>build trigger</strong> instructs Cloud Build to automatically build your image whenever there are changes pushed to the build source. You can set a build trigger to rebuild your images on any changes to the source repository, or only changes that match certain criteria. Build triggers can help ensure that your container images are always based on the latest version of their source code.</p>
+<p>Follow below steps to create a build trigger:</p>
+<ol type="1" start="1">
+<li>Open the <a href="https://console.cloud.google.com/cloud-build/triggers?_ga=2.3299120.-1499897486.1537177948" target="_blank">Build Trigger</a> page in the Google Cloud Platform Console.</li>
+</ol>
+<aside class="special"><p>Note: Make sure that Cloud Build API is enabled, if not Enable it by clicking on the Build Trigger link.</p>
+</aside>
+<ol type="1" start="2">
+<li>Select your project and click <strong>Open</strong>.</li>
+<li>Click <strong>Add trigger</strong>.</li>
+<li>Select <strong>Cloud Source Repository </strong>as your host repositories for your build source.</li>
+<li>Click <strong>Continue. </strong></li>
+<li>From the list of available repositories, select the desired repository, then click <strong>Continue</strong>.</li>
+<li>Enter the following trigger settings:</li>
+</ol>
+<ul>
+<li><strong>Name</strong> (optional): An name for your trigger.</li>
+<li><strong>Trigger Type</strong>: Select <strong>Branch</strong> as a trigger type. You can set a trigger to start a build on commits to a particular <em>branch</em>, or on commits that contain a particular <em>tag</em>. In either case, you can specify a regular expression with the branch or tag value to match. For information on acceptable regular expression syntax, see <a href="https://github.com/google/re2/wiki/Syntax" target="_blank">RE2 syntax</a>.</li>
+</ul>
+<aside class="special"><p>Note: Make sure that user should have source.repos.create permission before creating new repository. Whether based on branch commit or tag commit, builds are only triggered on pushes to the remote origin.  </p>
+</aside>
+<ul>
+<li><strong>Included files</strong> (optional): Leave this field as it is, changes to these files will trigger a build. You can use glob strings to specify multiple files with wildcard characters. Acceptable wildcard characters include the characters supported by <a href="https://golang.org/pkg/path/filepath/#Match" target="_blank">Go Match</a>, **, and <a href="https://en.wikipedia.org/wiki/Bash_(Unix_shell)#Brace_expansion" target="_blank">alternation</a>.</li>
+<li><strong>Ignored files</strong> (optional): Leave this field as it is, changes to these files will not trigger a build. You can use glob strings to specify multiple files with wildcard characters. Acceptable wildcard characters include the characters supported by <a href="https://golang.org/pkg/path/filepath/#Match" target="_blank">Go Match</a>, **, and <a href="https://en.wikipedia.org/wiki/Bash_(Unix_shell)#Brace_expansion" target="_blank">alternation</a>.</li>
+<li>Each time you push a change to your source, Cloud Build looks through your changed files for included and ignored files to determine whether a build should be triggered:</li>
+<li>If you push a change to your repository on an existing branch, Cloud Build looks at the files changed between the commit you just pushed and the commit to which the branch previously pointed.</li>
+<li>If you push a change to a newly created branch or tag, then Cloud Build treats all the files in the repository as changed files.</li>
+<li>If you delete a branch or a tag, Cloud Build does not trigger a build.</li>
+<li><strong>Build Configuration</strong>: Select <strong>cloudbuild.yaml</strong> as Build Configuration</li>
+</ul>
+<p>Click <strong>Create trigger</strong> to save the build trigger.</p>
+<p>Congratulations..!! Now your Build Trigger is ready. </p>
+<aside class="special"><p>Note: As we are deploying our tensorflow model on kubernetes. It is utmost important that we should provide <strong>Kubernetes Cluster Admin</strong> access to <strong>cloud build service account</strong>. To do so follow the below steps:</p>
+</aside>
+<p>Now we will provide Kubernetes Cluster Admin access to Cloud Build service account by following below steps:</p>
+<ol type="1" start="1">
+<li>In GCP Console, visit the <a href="https://console.cloud.google.com/iam-admin/iam/project" target="_blank">IAM menu</a>.</li>
+<li>From the list of service accounts, click on <strong>[YOUR-PROJECT-ID]@cloudbuild.gserviceaccount.com </strong>service account and then click on <strong>edit</strong> pencil button.</li>
+<li> Click on <strong>ADD ANOTHER ROLE. </strong></li>
+<li>Search for <strong>Kubernetes Engine admin</strong> role, select that role.</li>
+<li>Click <strong>SAVE.</strong></li>
+</ol>
+<p>Congratulations..!! Now we are completely ready to test our CI/CD Pipeline.</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Test Build Trigger" duration="0">
+        <p>To manually test a build trigger, click <strong>Run trigger</strong> on your trigger&#39;s entry in the triggers list or just make any changes to your source repository file and commit changes, build trigger will automatically get triggered. You can check the execution of triggers in cloud build <strong>History </strong>tab.</p>
+
+
+      </google-codelab-step>
+    
+  </google-codelab>
+
+  <script>
+    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+    ga('create', 'UA-49880327-14', 'auto');
+
+    (function() {
+      var gaCodelab = '';
+      if (gaCodelab) {
+        ga('create', gaCodelab, 'auto', {name: 'codelab'});
+      }
+
+      var gaView;
+      var parts = location.search.substring(1).split('&');
+      for (var i = 0; i < parts.length; i++) {
+        var param = parts[i].split('=');
+        if (param[0] === 'viewga') {
+          gaView = param[1];
+          break;
+        }
+      }
+      if (gaView && gaView !== gaCodelab) {
+        ga('create', gaView, 'auto', {name: 'view'});
+      }
+    })();
+  </script>
+
+</body>
+</html>
